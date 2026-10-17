@@ -1,0 +1,8 @@
+node_modules/
+auth_info_baileys*/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.zip

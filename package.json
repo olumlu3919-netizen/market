@@ -1,0 +1,39 @@
+{
+  "name": "whatsapp-bot",
+  "version": "1.0.0",
+  "description": "whatsapp-bot to use to solve ed date problem",
+  "keywords": [
+    "whatsapp-bot"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "whatsapp-bot"
+  },
+  "license": "ISC",
+  "author": "gorkem goktepe",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "dev:api": "nodemon server.js",
+    "dev:bot": "nodemon bot.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "@zxing/library": "^0.23.0",
+    "axios": "^1.19.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jimp": "^1.6.1",
+    "mongodb": "^7.5.0",
+    "node-cron": "^4.6.0",
+    "node-fetch": "^3.3.2",
+    "node-telegram-bot-api": "^1.2.0",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
