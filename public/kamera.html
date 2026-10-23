@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Barkod</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+    :root { --bg:#17212b; --card:#242f3d; --line:#2b394a; --text:#fff; --mute:#9fb1c4; --blue:#2481cc; --accent:#64b5ef; --ok:#5fd17a; --err:#ff7a7a; --warn:#f0b24a; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 14px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; }
+    .wrap { width: 100%; max-width: 440px; }
+    .card { background: var(--card); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+    h3 { color: var(--accent); font-size: 17px; }
+    .mute { color: var(--mute); font-size: 12px; }
+    #status { font-size: 13px; color: var(--mute); margin: 4px 0 10px; min-height: 18px; }
+    #status.ok { color: var(--ok); } #status.err { color: var(--err); }
+    #reader { width: 100%; border-radius: 12px; overflow: hidden; background: #0e1621; min-height: 220px; }
+    .row { display: flex; gap: 8px; margin-top: 10px; }
+    button { flex: 1; padding: 12px; border: 0; border-radius: 10px; background: var(--blue); color: #fff;
+        font-size: 15px; font-weight: 600; cursor: pointer; }
+    button.ghost { background: var(--line); color: var(--accent); }
+    button.small { padding: 7px 10px; font-size: 13px; flex: none; }
+    button.danger { background: #8a2f35; }
+    button:disabled { opacity: .5; }
+    [hidden] { display: none !important; }
+    label { display: block; font-size: 12px; color: var(--mute); margin: 10px 0 4px; }
+    input, select { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+        color: var(--text); font-size: 16px; }
+    input:disabled { opacity: .6; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+    .badge.local { background: #1f4d2e; color: var(--ok); }
+    .badge.off { background: #1f3b57; color: var(--accent); }
+    .badge.new { background: #54421a; color: var(--warn); }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .chip { flex: none; padding: 7px 11px; font-size: 13px; background: var(--line); color: var(--accent); border-radius: 999px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .stepper { display: flex; gap: 6px; align-items: center; }
+    .stepper input { text-align: center; }
+    .stepper button { flex: none; width: 44px; }
+    .entry { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+    .entry:first-of-type { border-top: 0; }
+    .entry .info { flex: 1; }
+    .manual { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+    <!-- 1) Tarama -->
+    <div id="scanView" class="card">
+        <h3>📸 Barkod Okut</h3>
+        <p id="status">Kamera hazırlanıyor...</p>
+        <div id="reader"></div>
+        <div class="row">
+            <button id="torchBtn" class="ghost" hidden>🔦 Fener</button>
+            <button id="restartBtn" hidden>🔄 Kamerayı Aç</button>
+        </div>
+        <div class="manual">
+            <label for="manual" style="margin-top:0">Okumazsa numarayı yaz</label>
+            <div class="row" style="margin-top:0">
+                <input id="manual" type="text" inputmode="numeric" placeholder="8690504008513" autocomplete="off" style="flex:2">
+                <button id="manualBtn">Getir</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2) Ürün formu -->
+    <div id="formView" hidden>
+        <div class="card">
+            <span id="badge" class="badge"></span>
+            <div class="mute" id="barcodeLine"></div>
+
+            <label for="name">Ürün adı</label>
+            <input id="name" type="text" maxlength="120" placeholder="Marka Ürün Gramaj (örn: Pınar Süt 1 L)" autocomplete="off">
+
+            <div class="grid2">
+                <div><label for="brand">Marka</label><input id="brand" type="text" maxlength="60" autocomplete="off"></div>
+                <div><label for="price">Fiyat (₺)</label><input id="price" type="text" inputmode="decimal" placeholder="42,50" autocomplete="off"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>📅 SKT ve adet</h3>
+            <label for="date" style="margin-top:6px">Son kullanma tarihi</label>
+            <input id="date" type="date">
+            <div class="chips" id="chips"></div>
+
+            <label>Adet</label>
+            <div class="stepper">
+                <button type="button" class="ghost" id="qtyMinus">−</button>
+                <input id="qty" type="number" inputmode="numeric" min="1" max="9999" value="1">
+                <button type="button" class="ghost" id="qtyPlus">+</button>
+            </div>
+        </div>
+
+        <div class="card" id="entriesCard" hidden>
+            <h3>📦 Raftaki SKT'ler</h3>
+            <label for="reason" style="margin-top:2px">Neden düşülüyor?</label>
+            <select id="reason">
+                <option value="satildi">✅ Satıldı</option>
+                <option value="iade">↩️ İade</option>
+                <option value="zayi">🗑 Zayi (bozuk / SKT geçti)</option>
+            </select>
+            <div id="entries" style="margin-top:8px"></div>
+        </div>
+
+        <p id="formStatus" class="mute" style="margin:0 2px 10px;min-height:16px"></p>
+        <div class="row" style="margin-top:0">
+            <button id="saveBtn">💾 Kaydet</button>
+        </div>
+        <div class="row">
+            <button id="cancelBtn" class="ghost">⬅️ Vazgeç / Yeni tara</button>
+        </div>
+    </div>
+
+    <!-- 3) Başarı -->
+    <div id="doneView" class="card" hidden>
+        <h3 id="doneTitle">✅ Kaydedildi</h3>
+        <p class="mute" id="doneText" style="margin-top:6px"></p>
+        <div class="row">
+            <button id="nextBtn">📸 Sonraki ürünü tara</button>
+        </div>
+        <div class="row">
+            <button id="closeBtn" class="ghost">Bitir</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+
+    var $ = function (id) { return document.getElementById(id); };
+    var scanner = null, handled = false, torchOn = false;
+    var current = null; // { source, product }
+
+    // ---------- Yardımcılar ----------
+    function setStatus(text, cls) { $('status').textContent = text; $('status').className = cls || ''; }
+    function setFormStatus(text, cls) { $('formStatus').textContent = text; $('formStatus').style.color = cls === 'err' ? 'var(--err)' : cls === 'ok' ? 'var(--ok)' : 'var(--mute)'; }
+    function show(view) { ['scanView', 'formView', 'doneView'].forEach(function (v) { $(v).hidden = (v !== view); }); }
+
+    async function api(method, url, body) {
+        var res = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': (tg && tg.initData) || '', 'ngrok-skip-browser-warning': 'true' },
+            body: body ? JSON.stringify(body) : undefined
+        });
+        var data = {};
+        try { data = await res.json(); } catch (e) { /* gövde yok */ }
+        if (!res.ok || data.success === false) {
+            var err = new Error(data.message || ('Hata (' + res.status + ')'));
+            err.status = res.status;
+            throw err;
+        }
+        return data;
+    }
+
+    function istanbulDate(offsetDays, offsetMonths) {
+        var now = new Date();
+        var parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(now).split('-').map(Number);
+        var d = new Date(Date.UTC(parts[0], parts[1] - 1 + (offsetMonths || 0), parts[2] + (offsetDays || 0)));
+        return d.toISOString().slice(0, 10);
+    }
+    function dayLabel(r) { return r < 0 ? 'SÜRESİ GEÇTİ' : r === 0 ? 'bugün' : r + ' gün'; }
+    function emoji(r) { return r <= 0 ? '💀' : r <= 3 ? '🔴' : r <= 15 ? '🟠' : '🟢'; }
+
+    // EAN-8 / UPC-A / EAN-13 / EAN-14 kontrol hanesi: yanlış okunan kareleri eler
+    function checksumOk(code) {
+        var d = code.split('').map(Number), check = d.pop(), sum = 0;
+        for (var i = d.length - 1, w = 3; i >= 0; i--, w = (w === 3 ? 1 : 3)) sum += d[i] * w;
+        return (10 - (sum % 10)) % 10 === check;
+    }
+    function acceptable(code) {
+        if (!/^\d+$/.test(code)) return code.length >= 4;
+        return [8, 12, 13, 14].indexOf(code.length) !== -1 && checksumOk(code);
+    }
+
+    // ---------- Tarayıcı ----------
+    async function stopScanner() {
+        if (scanner && scanner.isScanning) { try { await scanner.stop(); } catch (e) { /* önemsiz */ } }
+    }
+
+    async function startScanner() {
+        show('scanView');
+        $('restartBtn').hidden = true;
+        handled = false;
+        setStatus('Barkodu çerçevenin içine getirin...');
+        try {
+            if (!scanner) {
+                var F = Html5QrcodeSupportedFormats;
+                scanner = new Html5Qrcode('reader', {
+                    formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.QR_CODE],
+                    useBarCodeDetectorIfSupported: true, verbose: false
+                });
+            }
+            await scanner.start({ facingMode: 'environment' }, {
+                fps: 12,
+                qrbox: function (w, h) { return { width: Math.floor(Math.min(w * 0.92, 420)), height: Math.floor(Math.min(h * 0.45, 170)) }; }
+            }, function (text) {
+                var code = String(text).trim();
+                if (acceptable(code)) onCode(code);
+            }, function () { /* kare başına okuma hatası: önemsiz */ });
+
+            try { await scanner.applyVideoConstraints({ width: { ideal: 1280 }, height: { ideal: 720 }, advanced: [{ focusMode: 'continuous' }] }); } catch (e) { /* desteklenmiyor */ }
+            try { $('torchBtn').hidden = !scanner.getRunningTrackCameraCapabilities().torchFeature().isSupported(); } catch (e) { $('torchBtn').hidden = true; }
+        } catch (err) {
+            setStatus('❌ Kamera açılamadı: ' + (err && err.message ? err.message : err), 'err');
+            $('restartBtn').hidden = false;
+        }
+    }
+
+    // ---------- Barkod okununca: otomatik getir ve formu aç ----------
+    async function onCode(code) {
+        if (handled) return;
+        handled = true;
+        if (navigator.vibrate) navigator.vibrate(80);
+        await stopScanner();
+        setStatus('Okundu: ' + code + ' — ürün aranıyor...', 'ok');
+        try {
+            var data = await api('GET', '/api/urun/' + encodeURIComponent(code));
+            openForm(data.source, data.product);
+        } catch (err) {
+            handled = false;
+            $('restartBtn').hidden = false;
+            setStatus('❌ ' + err.message, 'err');
+        }
+    }
+
+    function openForm(source, p) {
+        current = { source: source, product: p };
+        var badge = $('badge');
+        if (source === 'local') { badge.className = 'badge local'; badge.textContent = '✅ Kayıtlı ürün'; }
+        else if (source === 'openfoodfacts') { badge.className = 'badge off'; badge.textContent = '🌐 Open Food Facts\'ten geldi'; }
+        else { badge.className = 'badge new'; badge.textContent = '🆕 Yeni ürün: bilgileri girin'; }
+
+        $('barcodeLine').textContent = p.barcode ? '🔢 ' + p.barcode : '';
+        $('name').value = p.name || '';
+        $('name').disabled = (source === 'local');   // kayıtlı ürünün adı admin panelinden / bottan değişir
+        $('brand').value = p.brand || '';
+        $('brand').disabled = (source === 'local');
+        $('price').value = p.price != null ? String(p.price).replace('.', ',') : '';
+        $('date').value = '';
+        $('qty').value = 1;
+        setFormStatus('');
+        $('saveBtn').disabled = false;
+        renderEntries();
+        show('formView');
+        if (source === null) $('name').focus();
+    }
+
+    function renderEntries() {
+        var p = current.product, box = $('entries');
+        box.textContent = '';
+        $('entriesCard').hidden = !(p.entries && p.entries.length);
+        (p.entries || []).forEach(function (e) {
+            var row = document.createElement('div'); row.className = 'entry';
+            var info = document.createElement('div'); info.className = 'info';
+            info.textContent = emoji(e.remainingDay) + ' ' + e.viewDate + ' • ' + e.quantity + ' adet • ' + dayLabel(e.remainingDay);
+            var b1 = document.createElement('button'); b1.className = 'small ghost'; b1.textContent = '−1';
+            b1.onclick = function () { removeEntry(e.expirationDate, 1); };
+            var b2 = document.createElement('button'); b2.className = 'small danger'; b2.textContent = 'Hepsi';
+            b2.onclick = function () { removeEntry(e.expirationDate); };
+            row.appendChild(info); row.appendChild(b1); row.appendChild(b2);
+            box.appendChild(row);
+        });
+    }
+
+    async function removeEntry(key, qty) {
+        try {
+            var body = { key: key, reason: $('reason').value }; if (qty) body.quantity = qty;
+            var data = await api('POST', '/api/dus/' + current.product.ref, body);
+            current.product = data.product;
+            renderEntries();
+            setFormStatus('✅ Düşüldü', 'ok');
+        } catch (err) { setFormStatus('❌ ' + err.message, 'err'); }
+    }
+
+    // ---------- Kaydet ----------
+    async function save() {
+        var p = current.product;
+        var name = $('name').value.trim();
+        if (!p.ref && !name) { setFormStatus('⚠️ Ürün adını yazın.', 'err'); $('name').focus(); return; }
+
+        var priceText = $('price').value.trim();
+        var price = undefined;
+        if (priceText !== '') {
+            var s = priceText.replace(/[^\d,.]/g, '');
+            if (s.indexOf(',') !== -1) s = s.replace(/\./g, '').replace(',', '.');
+            price = parseFloat(s);
+            if (!isFinite(price)) { setFormStatus('⚠️ Fiyat geçersiz.', 'err'); return; }
+        }
+        var qty = parseInt($('qty').value, 10);
+        if (!(qty >= 1)) { setFormStatus('⚠️ Adet en az 1 olmalı.', 'err'); return; }
+
+        $('saveBtn').disabled = true;
+        setFormStatus('Kaydediliyor...');
+        try {
+            var data = await api('POST', '/api/urun/kaydet', {
+                ref: p.ref || undefined, barcode: p.barcode || undefined,
+                name: name, brand: $('brand').value.trim(), price: price,
+                category: p.category || undefined, reminderDays: p.reminderDays || undefined,
+                dateKey: $('date').value || undefined, quantity: qty
+            });
+            var r = data.product;
+            var msg = r.name;
+            if ($('date').value) msg += ' — ' + qty + ' adet' + (data.merged ? ' eklendi (toplam ' + data.total + ')' : ' eklendi');
+            $('doneTitle').textContent = data.created ? '✅ Yeni ürün kaydedildi' : '✅ Kaydedildi';
+            $('doneText').textContent = msg + (data.linked ? ' • eski ürüne barkod bağlandı' : '');
+            show('doneView');
+        } catch (err) {
+            $('saveBtn').disabled = false;
+            setFormStatus('❌ ' + err.message, 'err');
+        }
+    }
+
+    // ---------- Olaylar ----------
+    function initChips() {
+        [['+3 gün', 3, 0], ['+7 gün', 7, 0], ['+14 gün', 14, 0], ['+1 ay', 0, 1], ['+3 ay', 0, 3]].forEach(function (c) {
+            var b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = c[0];
+            b.onclick = function () { $('date').value = istanbulDate(c[1], c[2]); };
+            $('chips').appendChild(b);
+        });
+        $('date').min = istanbulDate(0, 0);
+    }
+
+    $('qtyMinus').onclick = function () { $('qty').value = Math.max(1, (parseInt($('qty').value, 10) || 1) - 1); };
+    $('qtyPlus').onclick = function () { $('qty').value = Math.min(9999, (parseInt($('qty').value, 10) || 1) + 1); };
+    $('saveBtn').onclick = save;
+    $('cancelBtn').onclick = startScanner;
+    $('nextBtn').onclick = startScanner;
+    $('closeBtn').onclick = function () { if (tg) tg.close(); else window.close(); };
+    $('restartBtn').onclick = startScanner;
+    $('torchBtn').onclick = async function () {
+        try { torchOn = !torchOn; await scanner.getRunningTrackCameraCapabilities().torchFeature().apply(torchOn); } catch (e) { torchOn = !torchOn; }
+    };
+    $('manualBtn').onclick = function () {
+        var code = $('manual').value.replace(/\s+/g, '');
+        if (!/^\d{6,14}$/.test(code)) { setStatus('⚠️ Barkod 6-14 haneli olmalı', 'err'); return; }
+        stopScanner().then(function () { handled = false; onCode(code); });
+    };
+
+    window.addEventListener('error', function (e) { setStatus('❌ Hata: ' + e.message, 'err'); });
+    window.addEventListener('load', function () {
+        initChips();
+        if (!(tg && tg.initData)) setStatus('⚠️ Bu sayfa Telegram içinden açılmalı (kayıt için gerekli).', 'err');
+        startScanner();
+    });
+</script>
+</body>
+</html>

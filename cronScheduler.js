@@ -1,59 +1,52 @@
+// cronScheduler.js
 const cron = require('node-cron');
-const axios = require('axios');
 const { sendNotification } = require('./telegramBot');
-const { response } = require('express');
 
-const API_BASE_URL = process.env.API_BASE_URL;
-
-
-function startCronScheduler() {
-
+function startCronScheduler(service) {
+    // Her gün 11:00 (İstanbul saati, sunucu UTC olsa bile)
     cron.schedule('0 11 * * *', async () => {
         try {
-            const response = await axios.get(`${API_BASE_URL}/liste`)
-            if (response.data.success && response.data.data.length > 0) {
-                const records = response.data.data;
-                const criticalRecords = records.filter(item => {
-                    const reminderLimit = item.productReminder || 7;
-                    return item.remainingDay <= reminderLimit || item.remainingDay <= 7;
-                });
+            // En fazla 30 gün ilerisi + süresi geçenler
+            const records = await service.listExpiring(30);
 
+            // Ürünün kendi hatırlatma süresi (kategoriye göre), yoksa 7 gün
+            const critical = records.filter((item) => item.remainingDay <= (item.productReminder || 7));
 
-                if (criticalRecords.length === 0) {
-                    await sendNotification("⏰ Cron: Bugün hatırlatılacak kritik SKT ürünü yok.");
-                    return;
+            if (critical.length === 0) {
+                await sendNotification('⏰ Bugün hatırlatılacak kritik SKT ürünü yok.');
+                return;
+            }
+
+            let report = '🔔 *GÜNLÜK OTOMATİK SKT HATIRLATMASI*\n\n';
+            report += `Hatırlatma süresi yaklaşan veya geçen *${critical.length}* kayıt bulundu:\n\n`;
+
+            for (const item of critical) {
+                let emoji = '🟢';
+                let status = `(Kalan: *${item.remainingDay} gün*)`;
+
+                if (item.remainingDay < 0) {
+                    emoji = '💀';
+                    status = '*(SÜRESİ GEÇTİ!)*';
+                } else if (item.remainingDay === 0) {
+                    emoji = '☠️';
+                    status = '*(BUGÜN BİTİYOR!)*';
+                } else if (item.remainingDay <= 3) {
+                    emoji = '🔴';
+                } else if (item.remainingDay <= 7) {
+                    emoji = '🟠';
                 }
-                let reportMessage = `🔔 *GÜNLÜK OTOMATİK SKT HATIRLATMASI*\n\n`;
-                reportMessage += `Hatırlatma süresi yaklaşan veya geçen *${criticalRecords.length}* ürün bulundu:\n\n`;
 
-                criticalRecords.forEach(item => {
-                    let emoji = "🟢";
-                    let statusText = `(Kalan: *${item.remainingDay} gün*)`;
+                report += `${emoji} *${item.productName}* (${item.quantity} adet)\n⏳ SKT: ${item.viewDate} ${status}\n\n`;
+            }
 
-                    if (item.remainingDay < 0) {
-                        emoji = "💀";
-                        statusText = `*(SÜRESİ GEÇTİ!)*`;
-                    } else if (item.remainingDay === 0) {
-                        emoji = "☠️";
-                        statusText = `*(BUGÜN BİTİYOR!)*`;
-                    } else if (item.remainingDay <= 3) {
-                        emoji = "🔴";
-                    } else if (item.remainingDay <= 7) {
-                        emoji = "🟠";
-                    }
-
-                    reportMessage += `${emoji} *${item.productName}*\n ⏳ SKT: ${item.viewDate} ${statusText}\n\n`;
-                });
-
-                reportMessage += `💡 _Lütfen raftaki ürünleri kontrol edip düşümlerini (!dus) yapınız._`;
-
-                await sendNotification(reportMessage)
-            };
-
+            report += '💡 _Lütfen raftaki ürünleri kontrol edip düşümlerini (!dus) yapınız._';
+            await sendNotification(report);
         } catch (error) {
-            console.error("⏰ Cron Servisi Hatası:", error.response?.data || error.message);
+            console.error('⏰ Cron Servisi Hatası:', error.message);
         }
-    });
-};
+    }, { timezone: 'Europe/Istanbul' });
+
+    console.log('⏰ Cron zamanlayıcı başlatıldı (her gün 11:00 İstanbul)');
+}
 
 module.exports = startCronScheduler;

@@ -1,4 +1,5 @@
 // parser.js
+// Komut metnini ve tarih/fiyat girişlerini ayrıştırır. Tüm "bugün" hesapları İstanbul saatine göredir.
 
 const CATEGORIES = {
     milk: 4,
@@ -7,7 +8,7 @@ const CATEGORIES = {
     drinks: 14,
     legumes: 30,
     cleaning: 60,
-    std: 7
+    std: 7,
 };
 
 const TURKISH_CATEGORIES = {
@@ -29,120 +30,106 @@ const TURKISH_CATEGORIES = {
     'yag': 'legumes', 'temizlik': 'cleaning', 'camasir': 'cleaning',
     'çamaşır': 'cleaning', 'kozmetik': 'cleaning', 'deterjan': 'cleaning',
     'sabun': 'cleaning', 'şampuan': 'cleaning', 'sampuan': 'cleaning',
-    'standart': 'std', 'std': 'std', 'normal': 'std'
+    'standart': 'std', 'std': 'std', 'normal': 'std',
 };
+
+function istanbulToday() {
+    const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' })
+        .format(new Date()).split('-').map(Number);
+    return { y, m, d };
+}
+
+// Ürün adındaki kelimelerden kategori ve hatırlatma gününü tahmin eder
+function guessCategory(name) {
+    const words = String(name || '').toLocaleLowerCase('tr-TR').split(/\s+/).filter(Boolean);
+    for (const w of words) {
+        const cat = TURKISH_CATEGORIES[w];
+        if (cat) return { category: cat, reminderDay: CATEGORIES[cat] };
+    }
+    return { category: 'std', reminderDay: CATEGORIES.std };
+}
 
 function ExpirationDateCalculater(dateData) {
     if (!dateData) return null;
-    let expirationDate = new Date();
+    const t = istanbulToday();
+    let date = new Date(Date.UTC(t.y, t.m - 1, t.d));
 
-    if (dateData.type === 'relative') { 
-        if (dateData.unit === 'g') expirationDate.setDate(expirationDate.getDate() + dateData.num);
-        else if (dateData.unit === 'h') expirationDate.setDate(expirationDate.getDate() + (dateData.num * 7));
-        else if (dateData.unit === 'a') expirationDate.setMonth(expirationDate.getMonth() + dateData.num);
-        else if (dateData.unit === 'y') expirationDate.setFullYear(expirationDate.getFullYear() + dateData.num);
+    if (dateData.type === 'relative') {
+        const n = dateData.num;
+        if (dateData.unit === 'g') date.setUTCDate(date.getUTCDate() + n);
+        else if (dateData.unit === 'h') date.setUTCDate(date.getUTCDate() + n * 7);
+        else if (dateData.unit === 'a') date.setUTCMonth(date.getUTCMonth() + n);
+        else if (dateData.unit === 'y') date.setUTCFullYear(date.getUTCFullYear() + n);
     } else if (dateData.type === 'exact') {
-        expirationDate = new Date(dateData.year, dateData.month - 1, dateData.day);
+        date = new Date(Date.UTC(dateData.year, dateData.month - 1, dateData.day));
     }
-    
+
+    const yyyy = date.getUTCFullYear();
+    const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(date.getUTCDate()).padStart(2, '0');
     return {
-        dbTimestamp: expirationDate.getTime(),
-        dbDate: `${expirationDate.getFullYear()}-${String(expirationDate.getMonth() + 1).padStart(2, '0')}-${String(expirationDate.getDate()).padStart(2, '0')}`,
-        viewDate: `${String(expirationDate.getDate()).padStart(2, '0')}/${String(expirationDate.getMonth() + 1).padStart(2, '0')}/${expirationDate.getFullYear()}`
+        dbTimestamp: date.getTime(),
+        dbDate: `${yyyy}-${mm}-${dd}`,
+        viewDate: `${dd}/${mm}/${yyyy}`,
     };
+}
+
+// "5g" "2h" "3a" "1y" veya 15.08.2026 / 15.08 / 08.2026
+// Döner: null (tarih değil) | { error } | { data }
+function parseDateToken(token) {
+    const rel = token.match(/^(\d+)([ghay])$/);
+    if (rel) return { data: { type: 'relative', num: parseInt(rel[1], 10), unit: rel[2] } };
+
+    const parts = token.split(/[.\-\/]/);
+    if (parts.length < 2 || parts.length > 3 || !parts.every((x) => /^\d+$/.test(x))) return null;
+
+    const t = istanbulToday();
+    let day, month, year;
+    if (parts.length === 3) {
+        [day, month, year] = parts.map(Number);
+    } else {
+        const second = parseInt(parts[1], 10);
+        if (second > 12 || parts[1].length === 4) {
+            day = 1; month = parseInt(parts[0], 10); year = second;
+        } else {
+            day = parseInt(parts[0], 10); month = second; year = t.y;
+        }
+    }
+    if (year < 100) year += 2000;
+
+    const check = new Date(Date.UTC(year, month - 1, day));
+    if (month < 1 || month > 12 || check.getUTCDate() !== day || check.getUTCMonth() !== month - 1) {
+        return { error: '⚠️ Geçersiz tarih. Örn: 15.08.2026' };
+    }
+    if (year * 10000 + month * 100 + day < t.y * 10000 + t.m * 100 + t.d) {
+        return { error: '⚠️ Tarih geçmişte kalmış. Lütfen ileri bir tarih girin.' };
+    }
+    return { data: { type: 'exact', day, month, year } };
 }
 
 function regWork(p) {
     if (!p || !p.startsWith('!')) return null;
-    p = p.toLowerCase();
+    p = p.toLocaleLowerCase('tr-TR');
     const words = p.trim().split(/\s+/);
-
-    const command = words[0].toLowerCase();
+    const command = words[0];
     const args = words.slice(1);
-
-    const stdDateData = { type: null, num: null, unit: null, day: null, month: null, year: null };
 
     let productName = null;
     let dateData = null;
-    let category = "std";
-    let reminderDay = CATEGORIES["std"];
-    let brand = null;
-    
+
     if (args.length > 0) {
-        let isDateMatched = false;
-        const lastArg = args[args.length - 1];
-        const regDateRel = /^(\d+)([ghay])$/i;
-
-        if (regDateRel.test(lastArg)) {
-            const matches = lastArg.match(regDateRel);
-            stdDateData.type = 'relative';
-            stdDateData.num = parseInt(matches[1]);
-            stdDateData.unit = matches[2].toLowerCase();
-            isDateMatched = true;
-        } else {
-            const parts = lastArg.split(/[\.\-\/]/);
-            const day = new Date();
-
-            if (parts.length >= 2 && parts.length <= 3) {
-                stdDateData.type = 'exact';
-
-                if (parts.length === 3) {
-                    stdDateData.day = parseInt(parts[0]);
-                    stdDateData.month = parseInt(parts[1]);
-                    stdDateData.year = parseInt(parts[2]);
-                    isDateMatched = true;
-                } else if (parts.length === 2) {
-                    const partSecond = parseInt(parts[1]);
-                    if (partSecond > 12 || parts[1].length === 4) {
-                        stdDateData.day = 1;
-                        stdDateData.month = parseInt(parts[0]);
-                        stdDateData.year = parseInt(parts[1]);
-                        isDateMatched = true;
-                    } else {
-                        stdDateData.day = parseInt(parts[0]);
-                        stdDateData.month = parseInt(parts[1]);
-                        stdDateData.year = day.getFullYear();
-                        isDateMatched = true;
-                    }
-                }
-
-                if (stdDateData.year < 100 && stdDateData.year !== null) {
-                    stdDateData.year = stdDateData.year + 2000;
-                }
-            }
-        }
-
-        const today = new Date();
-        if (isDateMatched) {
-            if (
-                stdDateData.type === 'exact' &&
-                (stdDateData.year < today.getFullYear() ||
-                (stdDateData.year === today.getFullYear() && stdDateData.month < (today.getMonth() + 1)) ||
-                (stdDateData.year === today.getFullYear() && stdDateData.month === (today.getMonth() + 1) && stdDateData.day < today.getDate()))
-            ) {
-                return { error: "⚠️ Tarih yazımı hatası. Lütfen ileri bir tarih girin..." };
-            }
+        const parsed = parseDateToken(args[args.length - 1]);
+        if (parsed?.error) return { error: parsed.error };
+        if (parsed?.data) {
+            dateData = parsed.data;
             productName = args.slice(0, -1).join(' ');
-            dateData = stdDateData;
         } else {
             productName = args.join(' ');
         }
     }
 
-    if (productName) {
-        const productWords = productName.split(/\s+/);
-        brand = productWords[0];
-
-        for (let a of productWords.slice(1)) {
-            if (TURKISH_CATEGORIES[a]) {
-                category = TURKISH_CATEGORIES[a];
-                reminderDay = CATEGORIES[category];
-                break;
-            }
-        }
-    }
-
-    const expirationInfo = ExpirationDateCalculater(dateData);
+    const { category, reminderDay } = guessCategory(productName);
+    const brand = productName ? productName.split(/\s+/)[0] : null;
 
     return {
         command,
@@ -151,8 +138,33 @@ function regWork(p) {
         category,
         reminderDay,
         brand,
-        expirationInfo
+        expirationInfo: ExpirationDateCalculater(dateData),
     };
 }
 
-module.exports = { regWork, ExpirationDateCalculater };
+// Butonlu akışta kullanıcı "15.08.2026", "10g" veya "15.08.2026 6" (tarih + adet) yazar
+function parseExpiryInput(text) {
+    const tokens = String(text).trim().split(/\s+/).filter(Boolean);
+    let quantity = 1;
+    if (tokens.length === 2 && /^\d{1,4}$/.test(tokens[1])) quantity = parseInt(tokens.pop(), 10);
+    if (tokens.length !== 1 || quantity < 1) {
+        return { error: '⚠️ Tarihi anlayamadım. Örn: 15.08.2026, 10g, 2a ya da adetle: 15.08.2026 6' };
+    }
+    const r = regWork('!t ' + tokens[0]);
+    if (r?.error) return { error: r.error };
+    if (!r?.expirationInfo) {
+        return { error: '⚠️ Tarihi anlayamadım. Örn: 15.08.2026, 10g, 2a ya da adetle: 15.08.2026 6' };
+    }
+    return { dateKey: r.expirationInfo.dbDate, viewDate: r.expirationInfo.viewDate, quantity };
+}
+
+// "42,50" | "42.5" | "1.250,50" -> sayı
+function parsePrice(text) {
+    let s = String(text).replace(/[^\d,.]/g, '');
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    const n = parseFloat(s);
+    if (!Number.isFinite(n) || n < 0 || n > 100000) return null;
+    return Math.round(n * 100) / 100;
+}
+
+module.exports = { regWork, ExpirationDateCalculater, guessCategory, parseExpiryInput, parsePrice };
